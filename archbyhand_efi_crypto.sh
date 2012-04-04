@@ -17,8 +17,8 @@ set -o nounset
 # this whole script needs to be customized, particularly disk partitions
 # and configuration, but this section contains global variables that
 # are used during the system configuration phase for convenience
-HOSTNAME=tau
-USERNAME=es
+HOSTNAME=dieter-t420s
+USERNAME=dieter
 
 # ------------------------------------------------------------------------
 # Globals
