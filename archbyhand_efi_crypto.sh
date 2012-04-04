@@ -158,8 +158,7 @@ ${PACMAN} --noconfirm -Sy gptfdisk btrfs-progs
 # ------------------------------------------------------------------------
 # Here we create three partitions:
 # 1. efi and /boot (one partition does double duty)
-# 2. swap
-# 3. our encrypted root
+# 2. our encrypted root
 # Note that all of these are on a GUID partition table scheme. This proves
 # to be quite clean and simple since we're not doing anything with MBR
 # boot partitions and the like.
@@ -172,39 +171,40 @@ sgdisk -a 2048 -o /dev/sda # new gpt disk 2048 alignment
 
 # create partitions
 sgdisk -n 1:0:+200M /dev/sda # partition 1 (UEFI BOOT), default start block, 200MB
-sgdisk -n 2:0:+4G /dev/sda # partition 2 (SWAP), default start block, 200MB
-sgdisk -n 3:0:0 /dev/sda # partition 3, (LUKS), default start, remaining space
+sgdisk -n 2:0:0 /dev/sda # partition 2, (LUKS), default start, remaining space
 
 # set partition types
 sgdisk -t 1:ef00 /dev/sda
-sgdisk -t 2:8200 /dev/sda
-sgdisk -t 3:8300 /dev/sda
+sgdisk -t 2:8300 /dev/sda
 
 # label partitions
 sgdisk -c 1:"UEFI Boot" /dev/sda
-sgdisk -c 2:"Swap" /dev/sda
-sgdisk -c 3:"LUKS" /dev/sda
+sgdisk -c 2:"LUKS" /dev/sda
 
 # format LUKS on root
-cryptsetup --cipher=aes-xts-plain --verify-passphrase --key-size=512 luksFormat /dev/sda3
-cryptsetup luksOpen /dev/sda3 root
+cryptsetup --cipher=aes-xts-plain --verify-passphrase --key-size=512 luksFormat /dev/sda2 # automatic alignment
+cryptsetup luksOpen /dev/sda2 sda2crypt
 
 # NOTE: make sure to add dm_crypt and aes_i586 to MODULES in rc.conf
 # NOTE2: actually this isn't required since we're mounting an encrypted root and grub2/initramfs handles this before we even get to rc.conf
 
+# add lvm
+pvcreate /dev/mapper/sda2crypt
+vgcreate cryptpool /dev/mapper/sda2crypt
+lvcreate -L 5G  -n var cryptpool
+lvcreate -L 15G -n home cryptpool
+lvcreate -L 15G -n root cryptpool
+
 # make filesystems
 echo -e "\nCreating Filesystems...\n$HR"
 mkfs.vfat /dev/sda1
-# following swap related commands not used now that we're encrypting our swap partition
-#mkswap /dev/sda2
-#swapon /dev/sda2
-#mkfs.ext4 /dev/sda3 # this is where we'd create an unencrypted root partition, but we're using luks instead
-mkfs.ext4 /dev/mapper/root
+mkfs.ext4 /dev/cryptpool/root
+mkfs.ext4 /dev/cryptpool/home
+mkfs.ext4 /dev/cryptpool/var
 
 # mount target
 mkdir -p ${INSTALL_TARGET}
-#mount /dev/sda3 ${INSTALL_TARGET} # this is where we'd mount the unencrypted root partition
-mount /dev/mapper/root ${INSTALL_TARGET}
+mount /dev/cryptpool/root ${INSTALL_TARGET}
 mkdir ${INSTALL_TARGET}/boot
 mount -t vfat /dev/sda1 ${INSTALL_TARGET}/boot
 
@@ -240,18 +240,13 @@ cat > ${INSTALL_TARGET}/etc/fstab <<FSTAB_EOF
 # 
 # /etc/fstab: static file system information
 #
-# <file system>		<dir>	<type>	<options>		<dump>	<pass>
-tmpfs			/tmp	tmpfs	nodev,nosuid		0	0
-/dev/sda1		/boot	vfat	defaults		0	0 
-/dev/mapper/cryptswap	none	swap	defaults		0	0 
-/dev/mapper/root	/ 	ext4	defaults,noatime	0	1 
+# <file system>     <dir> <type> <options>                <dump> <pass>
+tmpfs               /tmp  tmpfs  nodev,nosuid             0      0
+/dev/sda1           /boot vfat   defaults                 0      0
+/dev/cryptpool/root /     ext4   defaults,noatime,discard 0      1
+/dev/cryptpool/home /home ext4   defaults,noatime,discard 0      2
+/dev/cryptpool/var  /var  ext4   defaults,noatime,discard 0      2
 FSTAB_EOF
-
-# ------------------------------------------------------------------------
-# write crypttab
-# ------------------------------------------------------------------------
-# encrypted swap (random passphrase on boot)
-echo cryptswap /dev/sda2 SWAP "-c aes-xts-plain -h whirlpool -s 512" >> ${INSTALL_TARGET}/etc/crypttab
 
 # ------------------------------------------------------------------------
 # copy configs we want to carry over to target from install environment
@@ -296,7 +291,7 @@ mount -t vfat /dev/sda1 /boot
 # ------------------------------------------------------------------------
 # NOTE: intel_agp drm and i915 for intel graphics
 SetValue MODULES '\\"dm_mod dm_crypt aes_x86_64 ext2 ext4 vfat intel_agp drm i915\\"' /etc/mkinitcpio.conf
-SetValue HOOKS '\\"base udev pata scsi sata usb usbinput keymap consolefont encrypt filesystems\\"' /etc/mkinitcpio.conf
+SetValue HOOKS '\\"base udev pata scsi sata usb usbinput keymap consolefont encrypt lvm2 filesystems fsck\\"' /etc/mkinitcpio.conf
 mkinitcpio -p linux
 
 # locale-gen
@@ -321,7 +316,7 @@ modprobe dm-mod
 # even omit the cryptdevice altogether, though it will wag a finger at you for using
 # a deprecated syntax, so we're using the correct form here
 # NOTE: take out i915.modeset=1 unless you are on intel graphics
-SetValue GRUB_CMDLINE_LINUX '\\"cryptdevice=/dev/sda3:root add_efi_memmap i915.modeset=1 i915.i915_enable_rc6=1 i915.i915_enable_fbc=1 i915.lvds_downclock=1 pcie_aspm=force quiet\\"' /etc/default/grub
+SetValue GRUB_CMDLINE_LINUX '\\"root=/dev/mapper/cryptpool-root cryptdevice=/dev/sda2:sda2crypt:allow-discards ro add_efi_memmap i915.modeset=1 i915.i915_enable_rc6=1 i915.i915_enable_fbc=1 i915.lvds_downclock=1 pcie_aspm=force quiet\\"' /etc/default/grub
 
 # set output to graphical
 SetValue GRUB_TERMINAL_OUTPUT gfxterm /etc/default/grub
