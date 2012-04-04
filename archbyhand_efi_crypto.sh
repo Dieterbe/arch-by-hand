@@ -292,6 +292,7 @@ mount -t vfat /dev/sda1 /boot
 # NOTE: intel_agp drm and i915 for intel graphics
 SetValue MODULES '\\"dm_mod dm_crypt aes_x86_64 ext2 ext4 vfat intel_agp drm i915\\"' /etc/mkinitcpio.conf
 SetValue HOOKS '\\"base udev pata scsi sata usb usbinput keymap consolefont encrypt lvm2 filesystems fsck\\"' /etc/mkinitcpio.conf
+SetValue KEYMAP 'dvorak' /etc/rc.conf
 mkinitcpio -p linux
 
 # locale-gen
