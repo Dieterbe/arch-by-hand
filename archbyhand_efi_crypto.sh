@@ -319,7 +319,7 @@ locale-gen
 #${CHROOT_PACMAN} -Sy
 #${CHROOT_PACMAN} -R grub
 #rm -rf /boot/grub
-#${CHROOT_PACMAN} -S grub2-efi-x86_64
+${CHROOT_PACMAN} -S grub2-efi-x86_64
 
 # you can be surprisingly sloppy with the root value you give grub2 as a kernel option and
 # even omit the cryptdevice altogether, though it will wag a finger at you for using
