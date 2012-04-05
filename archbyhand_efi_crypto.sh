@@ -168,34 +168,38 @@ sgdisk -Z /dev/sda # zap all on disk
 sgdisk -a 2048 -o /dev/sda # new gpt disk 2048 alignment
 
 # create partitions
-sgdisk -n 1:0:+200M /dev/sda # partition 1 (UEFI BOOT), default start block, 200MB
-sgdisk -n 2:0:0 /dev/sda # partition 2, (LUKS), default start, remaining space
+sgdisk -n 1:0:+200M /dev/sda # partition 1 (UEFI SYS), default start block, 200MB
+sgdisk -n 2:0:+200M /dev/sda # partition 2 (BOOT), default start block, 200MB
+sgdisk -n 3:0:0 /dev/sda # partition 3, (LUKS), default start, remaining space
 
 # set partition types
 sgdisk -t 1:ef00 /dev/sda
 sgdisk -t 2:8300 /dev/sda
+sgdisk -t 3:8300 /dev/sda
 
 # label partitions
-sgdisk -c 1:"UEFI Boot" /dev/sda
-sgdisk -c 2:"LUKS" /dev/sda
+sgdisk -c 1:"UEFI System" /dev/sda
+sgdisk -c 2:"Boot" /dev/sda
+sgdisk -c 3:"LUKS" /dev/sda
 
 # format LUKS on root
-cryptsetup --cipher=aes-xts-plain --verify-passphrase --key-size=512 luksFormat /dev/sda2 # automatic alignment
-cryptsetup luksOpen /dev/sda2 sda2crypt
+cryptsetup --cipher=aes-xts-plain --verify-passphrase --key-size=512 luksFormat /dev/sda3 # automatic alignment
+cryptsetup luksOpen /dev/sda3 sda3crypt
 
 # NOTE: make sure to add dm_crypt and aes_i586 to MODULES in rc.conf
 # NOTE2: actually this isn't required since we're mounting an encrypted root and grub2/initramfs handles this before we even get to rc.conf
 
 # add lvm
-pvcreate /dev/mapper/sda2crypt
-vgcreate cryptpool /dev/mapper/sda2crypt
+pvcreate /dev/mapper/sda3crypt
+vgcreate cryptpool /dev/mapper/sda3crypt
 lvcreate -L 5G  -n var cryptpool
 lvcreate -L 15G -n home cryptpool
 lvcreate -L 15G -n root cryptpool
 
 # make filesystems
 echo -e "\nCreating Filesystems...\n$HR"
-mkfs.vfat /dev/sda1
+mkfs.vfat -F32 /dev/sda1
+mkfs.ext3 /dev/sda2
 mkfs.ext4 /dev/cryptpool/root
 mkfs.ext4 /dev/cryptpool/home
 mkfs.ext4 /dev/cryptpool/var
@@ -204,7 +208,9 @@ mkfs.ext4 /dev/cryptpool/var
 mkdir -p ${INSTALL_TARGET}
 mount /dev/cryptpool/root ${INSTALL_TARGET}
 mkdir ${INSTALL_TARGET}/boot
-mount -t vfat /dev/sda1 ${INSTALL_TARGET}/boot
+mount -t ext3 /dev/sda2 ${INSTALL_TARGET}/boot
+mkdir ${INSTALL_TARGET}/boot/efi
+mount -t vfat /dev/sda1 ${INSTALL_TARGET}/boot/efi
 
 # ------------------------------------------------------------------------
 # Install base, necessary utilities
@@ -240,7 +246,8 @@ cat > ${INSTALL_TARGET}/etc/fstab <<FSTAB_EOF
 #
 # <file system>     <dir> <type> <options>                <dump> <pass>
 tmpfs               /tmp  tmpfs  nodev,nosuid             0      0
-/dev/sda1           /boot vfat   defaults                 0      0
+/dev/sda1       /boot/efi vfat   defaults                 0      0
+/dev/sda2           /boot ext3   defaults                 0      0
 /dev/cryptpool/root /     ext4   defaults,noatime,discard 0      1
 /dev/cryptpool/home /home ext4   defaults,noatime,discard 0      2
 /dev/cryptpool/var  /var  ext4   defaults,noatime,discard 0      2
@@ -264,7 +271,8 @@ mount -t proc proc ${INSTALL_TARGET}/proc
 mount -t sysfs sys ${INSTALL_TARGET}/sys
 mount -o bind /dev ${INSTALL_TARGET}/dev
 
-# we have to remount /boot from inside the chroot
+# we have to remount /boot and /boot/efi from inside the chroot
+umount ${INSTALL_TARGET}/boot/efi
 umount ${INSTALL_TARGET}/boot
 
 # ------------------------------------------------------------------------
@@ -283,7 +291,10 @@ UncommentValue () { VALUENAME="\$1" FILEPATH="\$2"; sed -i "s/^#\(\${VALUENAME}.
 
 # remount here or grub et al gets confused
 # ------------------------------------------------------------------------
-mount -t vfat /dev/sda1 /boot
+mkdir -p /boot
+mount -t ext3 /dev/sda2 /boot
+mkdir -p /boot/efi
+mount -t vfat /dev/sda1 /boot/efi
 
 # mkinitcpio
 # ------------------------------------------------------------------------
@@ -315,22 +326,20 @@ modprobe dm-mod
 # even omit the cryptdevice altogether, though it will wag a finger at you for using
 # a deprecated syntax, so we're using the correct form here
 # NOTE: take out i915.modeset=1 unless you are on intel graphics
-SetValue GRUB_CMDLINE_LINUX '\\"root=/dev/mapper/cryptpool-root cryptdevice=/dev/sda2:sda2crypt:allow-discards ro add_efi_memmap i915.modeset=1 i915.i915_enable_rc6=1 i915.i915_enable_fbc=1 i915.lvds_downclock=1 pcie_aspm=force quiet\\"' /etc/default/grub
+SetValue GRUB_CMDLINE_LINUX '\\"root=/dev/mapper/cryptpool-root cryptdevice=/dev/sda3:sda3crypt:allow-discards ro add_efi_memmap i915.modeset=1 i915.i915_enable_rc6=1 i915.i915_enable_fbc=1 i915.lvds_downclock=1 pcie_aspm=force quiet\\"' /etc/default/grub
 
 # set output to graphical
 SetValue GRUB_TERMINAL_OUTPUT gfxterm /etc/default/grub
 SetValue GRUB_GFXMODE 960x600x32,auto /etc/default/grub
 SetValue GRUB_GFXPAYLOAD_LINUX keep /etc/default/grub # comment out this value if text only mode
 
-# install the actual grub2. Note that despite our --boot-directory option we will still need to move
-# the grub directory to /boot/grub during grub-mkconfig operations until grub2 gets patched (see below)
-grub_efi_x86_64-install --bootloader-id=grub --no-floppy --recheck
+mkdir -p /boot/efi/EFI
+
+# install the actual grub2
+grub-install --directory=/usr/lib/grub/x86_64-efi --root-directory=/boot/efi --boot-directory=/boot --bootloader-id=arch_grub --no-floppy --recheck &>/boot/grub.log
 
 # create our EFI boot entry
-efibootmgr --create --gpt --disk /dev/sda --part 1 --write-signature --label "ARCH LINUX" --loader "\\\\grub\\\\grub.efi"
-
-# copy font for grub2
-cp /usr/share/grub/unicode.pf2 /boot/grub
+efibootmgr --create --gpt --disk /dev/sda --part 1 --write-signature --label "ARCH LINUX (GRUB2)" --loader "\\\\EFI\\\\arch_grub\\\\grubx64.efi"
 
 # generate config file
 grub-mkconfig -o /boot/grub/grub.cfg
