@@ -280,7 +280,7 @@ umount ${INSTALL_TARGET}/boot/efi
 umount ${INSTALL_TARGET}/boot
 
 # ------------------------------------------------------------------------
-# Create install_efi script (to be run *after* chroot /install)
+# Create install_efi script (to be run *after* chroot ${INSTALL_TARGET})
 # ------------------------------------------------------------------------
 
 touch ${INSTALL_TARGET}/install_efi
@@ -397,6 +397,6 @@ POST_EOF
 # Post install in chroot
 # ------------------------------------------------------------------------
 #echo "chroot and run /post_install"
-chroot /install /post_install
-mv /install/post_install /.
+chroot ${INSTALL_TARGET} /post_install
+mv ${INSTALL_TARGET}/post_install /.
 
