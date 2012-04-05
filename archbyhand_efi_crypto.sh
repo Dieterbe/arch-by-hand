@@ -143,7 +143,6 @@ PACMANEOF
 [[ ! -d "${INSTALL_TARGET}/var/cache/pacman/pkg" ]] && mkdir -m 755 -p "${INSTALL_TARGET}/var/cache/pacman/pkg"
 [[ ! -d "${INSTALL_TARGET}/var/lib/pacman" ]] && mkdir -m 755 -p "${INSTALL_TARGET}/var/lib/pacman"
 ${PACMAN} -Sy
-${TARGET_PACMAN} -Sy
 
 # Install prereqs from network (not on archboot media)
 # ------------------------------------------------------------------------
