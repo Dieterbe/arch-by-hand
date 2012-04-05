@@ -212,10 +212,22 @@ mount -t ext3 /dev/sda2 ${INSTALL_TARGET}/boot
 mkdir ${INSTALL_TARGET}/boot/efi
 mount -t vfat /dev/sda1 ${INSTALL_TARGET}/boot/efi
 
+# kernel modules for EFI install
+# ------------------------------------------------------------------------
+modprobe efivars
+modprobe dm-mod
+
+# ------------------------------------------------------------------------
+# mount proc, sys, dev in install root
+# ------------------------------------------------------------------------
+mkdir -p ${INSTALL_TARGET}/{proc,sys,dev}
+mount -o bind /proc ${INSTALL_TARGET}/proc
+mount -o bind /sys ${INSTALL_TARGET}/sys
+mount -o bind /dev ${INSTALL_TARGET}/dev
+
 # ------------------------------------------------------------------------
 # Install base, necessary utilities
 # ------------------------------------------------------------------------
-
 mkdir -p ${INSTALL_TARGET}/var/lib/pacman
 ${TARGET_PACMAN} -Sy
 ${TARGET_PACMAN} -Su base
@@ -263,14 +275,6 @@ cp /etc/resolv.conf ${INSTALL_TARGET}/etc/resolv.conf
 mkdir -p ${INSTALL_TARGET}/tmp
 cp /tmp/pacman.conf ${INSTALL_TARGET}/tmp/pacman.conf
 
-# ------------------------------------------------------------------------
-# mount proc, sys, dev in install root
-# ------------------------------------------------------------------------
-
-mount -t proc proc ${INSTALL_TARGET}/proc
-mount -t sysfs sys ${INSTALL_TARGET}/sys
-mount -o bind /dev ${INSTALL_TARGET}/dev
-
 # we have to remount /boot and /boot/efi from inside the chroot
 umount ${INSTALL_TARGET}/boot/efi
 umount ${INSTALL_TARGET}/boot
@@ -308,11 +312,6 @@ mkinitcpio -p linux
 # ------------------------------------------------------------------------
 UncommentValue en_US /etc/locale.gen
 locale-gen
-
-# kernel modules for EFI install
-# ------------------------------------------------------------------------
-modprobe efivars
-modprobe dm-mod
 
 # install and configure grub2
 # ------------------------------------------------------------------------
